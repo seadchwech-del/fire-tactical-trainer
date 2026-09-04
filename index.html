@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<!-- Chosen Palette: Slate & Tactical Dark (Dark slate background with tactical Amber/Red/Emerald accents) -->
+<!-- Application Structure Plan: Designed as a 50/50 dual-pane tactical dashboard. Left pane handles time, scenario video, offensive/defensive strategy toggles, and master incident event logs. Right pane provides the interactive Tactical Worksheet including building info, SOP checklists per fire type, RECEO-VS stage trackers, 4-quadrant sectors with automatic 1:2 manpower safety pool calculation, and a MAYDAY/LUNAR emergency modal. This architecture allows an Incident Commander to practice tactical command during video simulations without losing context or requiring external tools. -->
+<!-- Visualization & Content Choices: Uses HTML5/CSS3 and Tailwind CSS grid/flex layouts for reactive panels. Manpower status uses real-time dynamic JS counters and dynamic alert badges. NO SVG elements are used (replaced with standard Unicode icons and pure CSS indicators). NO Mermaid JS used. All interactive states, timers, and modal dialogs are managed via Vanilla JS. -->
+<!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+<html lang="zh-TW" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>火場指揮官戰術管制與互動演練系統</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    .defensive-alert { animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+  </style>
+</head>
+<body class="h-full flex flex-col overflow-hidden text-xs">
+
+  <header class="bg-slate-900 border-b border-slate-800 px-4 py-2 flex flex-wrap items-center justify-between gap-2 shrink-0">
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2">
+        <span class="text-xl">🚒</span>
+        <h1 class="text-sm font-black tracking-wider text-slate-100">火場指揮官戰術管制與互動演練系統 <span class="text-[10px] bg-red-950 text-red-400 border border-red-800 px-1.5 py-0.5 rounded font-mono">IC TRAINER v2.0</span></h1>
+      </div>
+    </div>
+
+    <div id="manpowerStatusBar" class="flex items-center gap-3 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 text-xs">
+      <div class="flex items-center gap-1">
+        <span class="text-slate-400">現場可用:</span>
+        <input type="number" id="availableManpowerInput" value="12" min="0" 
+               class="w-12 bg-slate-900 border border-slate-700 text-center font-bold text-emerald-400 rounded px-1 py-0.5 focus:outline-none focus:border-emerald-500"
+               onchange="updateManpowerCalculations()">
+        <span class="text-slate-400">人</span>
+      </div>
+      <div class="h-3.5 w-px bg-slate-800"></div>
+      <div>
+        <span class="text-slate-400">室內作業:</span>
+        <span id="workingCount" class="font-bold text-blue-400 ml-1">0</span> 人
+      </div>
+      <div class="h-3.5 w-px bg-slate-800"></div>
+      <div>
+        <span class="text-slate-400">全場應備(1:2):</span>
+        <span id="requiredCount" class="font-bold text-amber-400 ml-1">0</span> 人
+      </div>
+      <div class="h-3.5 w-px bg-slate-800"></div>
+      <div id="manpowerAlertTag" class="px-2 py-0.5 rounded font-bold text-[11px] bg-emerald-950 text-emerald-300 border border-emerald-800">
+        人力安全 (1:2 符合)
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <button onclick="triggerMaydayModal()" class="bg-red-600 hover:bg-red-700 active:scale-95 text-white font-extrabold px-3 py-1.5 rounded text-xs tracking-wider flex items-center gap-1 shadow transition border border-red-500">
+        <span>🚨</span> MAYDAY / RIT
+      </button>
+      <button onclick="exportTacticalLog()" class="bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 px-3 py-1.5 rounded text-xs border border-slate-700 flex items-center gap-1">
+        <span>📋</span> 匯出 AAR
+      </button>
+    </div>
+  </header>
+
+  <main class="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-3 p-3 overflow-hidden">
+    
+    <section class="flex flex-col gap-3 h-full overflow-y-auto pr-1">
+      
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-md">
+        <div class="flex items-center gap-2 mb-2">
+          <input type="text" id="videoUrlInput" placeholder="輸入 YouTube 網址或 Video ID (預設ID: yut8ZOUGDzk)" 
+                 value="yut8ZOUGDzk"
+                 class="flex-1 bg-slate-950 border border-slate-700 text-xs rounded px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-red-500">
+          <button onclick="loadCustomVideo()" class="bg-slate-800 hover:bg-slate-700 text-xs font-semibold px-3 py-1.5 rounded text-slate-200 border border-slate-600 transition">
+            載入影片
+          </button>
+        </div>
+        
+        <div class="relative w-full pb-[56.25%] bg-black rounded-lg overflow-hidden border border-slate-800 shadow-inner">
+          <iframe id="ytPlayer" class="absolute top-0 left-0 w-full h-full"
+                  src="https://www.youtube.com/embed/yut8ZOUGDzk?enablejsapi=1" 
+                  title="Tactical Scenario" frameborder="0" 
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                  allowfullscreen>
+          </iframe>
+        </div>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-md flex flex-col gap-3">
+        <div class="grid grid-cols-2 gap-3">
+          
+          <div class="bg-slate-950 border border-slate-800 rounded-lg p-3 flex flex-col items-center justify-center">
+            <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">⏱️ 火場歷時 (INCIDENT CLOCK)</span>
+            <div id="masterClockDisplay" class="text-3xl font-mono font-black text-amber-400 tracking-wider">
+              00:00
+            </div>
+            <div class="flex gap-2 mt-2">
+              <button id="clockToggleBtn" onclick="toggleIncidentClock()" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition">
+                啟動計時
+              </button>
+              <button onclick="resetIncidentClock()" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded border border-slate-700 transition">
+                重設
+              </button>
+            </div>
+          </div>
+
+          <div id="strategyBox" class="bg-slate-950 border border-slate-800 rounded-lg p-3 flex flex-col justify-between">
+            <div class="flex justify-between items-center">
+              <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">當前戰術策略</span>
+              <span id="strategyIndicator" class="text-[10px] bg-blue-900/50 text-blue-300 border border-blue-700 px-1.5 py-0.5 rounded font-mono font-bold">OFFENSIVE</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 mt-2">
+              <button id="btnOffensive" onclick="setStrategy('OFFENSIVE')" 
+                      class="py-2 rounded font-black text-xs uppercase tracking-wider bg-blue-600 text-white shadow ring-2 ring-blue-400 transition">
+                進攻模式
+              </button>
+              <button id="btnDefensive" onclick="setStrategy('DEFENSIVE')" 
+                      class="py-2 rounded font-black text-xs uppercase tracking-wider bg-slate-800 text-slate-400 hover:bg-slate-700 transition">
+                防禦防護
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div id="parAlertBox" class="hidden bg-amber-950/80 border border-amber-500 text-amber-200 px-3 py-2 rounded-lg text-xs flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-amber-400">⚠️</span>
+            <span class="font-bold">【PAR 提醒】火場作戰已達 10 分鐘週期，請對各分區進行 PAR 點名與氣量確認！</span>
+          </div>
+          <button onclick="acknowledgeParAlert()" class="bg-amber-700 hover:bg-amber-600 text-white px-2 py-1 rounded text-[11px] font-bold">
+            確認完成
+          </button>
+        </div>
+
+        <div id="defensiveNotice" class="hidden bg-red-950/90 border-2 border-red-500 text-red-100 p-3 rounded-lg text-xs defensive-alert">
+          <div class="flex items-start gap-2">
+            <span class="text-lg">📢</span>
+            <div>
+              <p class="font-black text-sm tracking-wide text-red-300">防禦模式已啟動 (DEFENSIVE MODE DECLARED)</p>
+              <p class="mt-0.5 text-slate-300">1. 連續鳴笛長聲廣播下達全員緊急撤離。</p>
+              <p class="text-slate-300">2. 各分區安全管制員立即清點人數（緊急 PAR），禁止任何人員繼續內攻！</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-md flex-1 flex flex-col min-h-[200px]">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+            <span>📝</span> 指揮時序紀錄簿 (Event Log)
+          </span>
+          <button onclick="clearEventLogs()" class="text-[11px] text-slate-500 hover:text-slate-300">清除紀錄</button>
+        </div>
+        <div id="eventLogContainer" class="flex-1 bg-slate-950 border border-slate-800 rounded-lg p-2 overflow-y-auto font-mono text-xs text-slate-300 space-y-1.5 min-h-[120px]">
+          <div class="text-slate-500 italic">[00:00] 指揮官建立 Command，開始 360 環場評估。</div>
+        </div>
+        <div class="flex gap-2 mt-2">
+          <input type="text" id="manualLogInput" placeholder="快速輸入指令/回報 (例如: 2F回報搜索完畢)" 
+                 class="flex-1 bg-slate-950 border border-slate-700 text-xs rounded px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-blue-500"
+                 onkeydown="if(event.key==='Enter') addManualLog()">
+          <button onclick="addManualLog()" class="bg-blue-600 hover:bg-blue-500 text-xs px-3 py-1.5 rounded font-bold transition">
+            打卡標記
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="flex flex-col gap-3 h-full overflow-y-auto pl-1">
+      
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-md space-y-2.5">
+        
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-400 font-bold">火災類型 SOP:</span>
+            <select id="fireTypeSelect" onchange="onFireTypeChanged()" class="bg-slate-950 border border-slate-700 text-xs text-amber-300 font-bold rounded px-2 py-1 focus:outline-none">
+              <option value="residential">一般住宅 (Residential)</option>
+              <option value="factory">鐵皮 / 工廠化災 (HazMat/Factory)</option>
+              <option value="highrise">高樓火警 (High-Rise)</option>
+            </select>
+          </div>
+          
+          <div class="flex items-center gap-3 text-xs">
+            <label class="flex items-center gap-1 cursor-pointer">
+              <input type="checkbox" id="chk360" onchange="logCheckbox('360環場評估完成')" class="accent-red-600 rounded">
+              <span class="text-slate-300">360環場完成</span>
+            </label>
+            <label class="flex items-center gap-1 cursor-pointer">
+              <input type="checkbox" id="chkWater" onchange="logCheckbox('供水穩定建立')" class="accent-blue-600 rounded">
+              <span class="text-slate-300">水源穩定建立</span>
+            </label>
+            <label class="flex items-center gap-1 cursor-pointer">
+              <input type="checkbox" id="chkUtility" onchange="logCheckbox('瓦斯電力已截斷')" class="accent-emerald-600 rounded">
+              <span class="text-slate-300">斷電斷瓦斯</span>
+            </label>
+          </div>
+        </div>
+
+        <div id="sopContainer" class="bg-slate-950 p-2 rounded-lg border border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          <div>
+            <span class="text-[10px] text-slate-400 block">結構構造</span>
+            <input type="text" id="infoStructure" value="RC結構 / 2層" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200">
+          </div>
+          <div>
+            <span class="text-[10px] text-slate-400 block">起火樓層/位置</span>
+            <input type="text" id="infoFireFloor" value="C面車庫延燒2F" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200">
+          </div>
+          <div>
+            <span class="text-[10px] text-slate-400 block">受困/待救人數</span>
+            <input type="text" id="infoVictims" value="無人受困" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200">
+          </div>
+          <div>
+            <span class="text-[10px] text-slate-400 block">主要水源佔據</span>
+            <input type="text" id="infoWaterSource" value="公設消防栓 (雙開)" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200">
+          </div>
+        </div>
+
+        <div class="pt-1">
+          <span class="text-[10px] font-bold text-slate-400 block mb-1">RECEO-VS 戰術優先順序 (點擊切換進度狀態)</span>
+          <div class="grid grid-cols-7 gap-1">
+            <button onclick="cycleReceo(this, 'R (Rescue)')" class="receo-btn py-1 px-1 rounded text-[11px] font-bold bg-slate-800 text-slate-400 border border-slate-700">R:人命</button>
+            <button onclick="cycleReceo(this, 'E (Exposure)')" class="receo-btn py-1 px-1 rounded text-[11px] font-bold bg-slate-800 text-slate-400 border border-slate-700">E:延燒</button>
+            <button onclick="cycleReceo(this, 'C (Confinement)')" class="receo-btn py-1 px-1 rounded text-[11px] font-bold bg-slate-800 text-slate-400 border border-slate-700">C:侷限</button>
+            <button onclick="cycleReceo(this, 'E (Extinguishment)')" class="receo-btn py-1 px-1 rounded text-[11px] font-bold bg-slate-800 text-slate-400 border border-slate-700">E:滅火</button>
+            <button onclick="cycleReceo(this, 'O (Overhaul)')" class="receo-btn py-1 px-1 rounded text-[11px] font-bold bg-slate-800 text-slate-400 border border-slate-700">O:殘火</button>
+            <button onclick="cycleReceo(this, 'V (Ventilation)')" class="receo-btn py-1 px-1 rounded text-[11px] font-bold bg-slate-800 text-slate-400 border border-slate-700">V:通風</button>
+            <button onclick="cycleReceo(this, 'S (Salvage)')" class="receo-btn py-1 px-1 rounded text-[11px] font-bold bg-slate-800 text-slate-400 border border-slate-700">S:水損</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-md flex-1 flex flex-col min-h-[300px]">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold text-slate-200">四面環場分區 (Division / Sector)</span>
+            <span class="text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-800 px-1.5 py-0.5 rounded">1 作業 : 1 待命 : 1 修整</span>
+          </div>
+          <button onclick="addNewCustomDivision()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded border border-slate-700">
+            + 新增分區/樓層
+          </button>
+        </div>
+
+        <div id="divisionGrid" class="grid grid-cols-1 md:grid-cols-2 gap-2.5 flex-1 overflow-y-auto">
+          
+          <div class="division-card bg-slate-950 border border-slate-800 rounded-lg p-2.5 flex flex-col gap-2" data-div="Alpha">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
+              <span class="font-extrabold text-xs text-blue-400 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+                ALPHA 區 (正門正面)
+              </span>
+              <button onclick="openAssignModal('ALPHA 區')" class="text-[11px] bg-blue-600 hover:bg-blue-500 text-white font-semibold px-2 py-0.5 rounded shadow">
+                + 指派小組
+              </button>
+            </div>
+            <div class="unit-list space-y-1.5 min-h-[50px]" id="div-Alpha-units"></div>
+          </div>
+
+          <div class="division-card bg-slate-950 border border-slate-800 rounded-lg p-2.5 flex flex-col gap-2" data-div="Bravo">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
+              <span class="font-extrabold text-xs text-slate-300 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-slate-500"></span>
+                BRAVO 區 (左側)
+              </span>
+              <button onclick="openAssignModal('BRAVO 區')" class="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded border border-slate-700">
+                + 指派小組
+              </button>
+            </div>
+            <div class="unit-list space-y-1.5 min-h-[50px]" id="div-Bravo-units"></div>
+          </div>
+
+          <div class="division-card bg-slate-950 border border-slate-800 rounded-lg p-2.5 flex flex-col gap-2" data-div="Charlie">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
+              <span class="font-extrabold text-xs text-red-400 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                CHARLIE 區 (後側起火面)
+              </span>
+              <button onclick="openAssignModal('CHARLIE 區')" class="text-[11px] bg-red-600 hover:bg-red-500 text-white font-semibold px-2 py-0.5 rounded shadow">
+                + 指派小組
+              </button>
+            </div>
+            <div class="unit-list space-y-1.5 min-h-[50px]" id="div-Charlie-units"></div>
+          </div>
+
+          <div class="division-card bg-slate-950 border border-slate-800 rounded-lg p-2.5 flex flex-col gap-2" data-div="Delta">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
+              <span class="font-extrabold text-xs text-slate-300 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-slate-500"></span>
+                DELTA 區 (右側)
+              </span>
+              <button onclick="openAssignModal('DELTA 區')" class="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded border border-slate-700">
+                + 指派小組
+              </button>
+            </div>
+            <div class="unit-list space-y-1.5 min-h-[50px]" id="div-Delta-units"></div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="assignModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-md p-4 space-y-3">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+        <h3 class="font-bold text-sm text-slate-100" id="modalTargetSector">指派小組至分區</h3>
+        <button onclick="closeAssignModal()" class="text-slate-400 hover:text-white font-bold text-base">✖</button>
+      </div>
+      
+      <div class="space-y-2 text-xs">
+        <div>
+          <label class="block text-slate-400 mb-1">單位代號 (Unit Name)</label>
+          <input type="text" id="modalUnitName" placeholder="例如: E17 / L12" class="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-200">
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1">任務 (Task)</label>
+          <input type="text" id="modalUnitTask" placeholder="例如: 攻擊水线內攻 / 破門排煙" class="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-200">
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1">人數 (Firefighters)</label>
+          <input type="number" id="modalUnitCount" value="3" min="1" max="10" class="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-200">
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+        <button onclick="closeAssignModal()" class="px-3 py-1.5 bg-slate-800 text-slate-300 rounded hover:bg-slate-700">取消</button>
+        <button onclick="submitAssignUnit()" class="px-3 py-1.5 bg-blue-600 text-white font-bold rounded hover:bg-blue-500">確認指派</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="maydayModal" class="hidden fixed inset-0 bg-red-950/90 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-slate-900 border-2 border-red-500 rounded-xl w-full max-w-xl p-4 space-y-3 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-red-900/60 pb-2">
+        <div class="flex items-center gap-2 text-red-400 font-extrabold text-base">
+          <span>🚨</span>
+          <span>MAYDAY / RIT 緊急救援模式</span>
+        </div>
+        <button onclick="closeMaydayModal()" class="text-slate-400 hover:text-white font-bold">✖</button>
+      </div>
+
+      <div class="bg-slate-950 border border-slate-800 p-2.5 rounded-lg text-xs space-y-2">
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <span class="text-red-400 font-bold block">L - Location (受困位置)</span>
+            <input type="text" id="lunarL" placeholder="例如: 2F 後側樓梯口/臥室" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 mt-0.5">
+          </div>
+          <div>
+            <span class="text-red-400 font-bold block">U - Unit (受困單位)</span>
+            <input type="text" id="lunarU" placeholder="例如: L12 搜救組" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 mt-0.5">
+          </div>
+          <div>
+            <span class="text-red-400 font-bold block">N - Name (姓名/人數)</span>
+            <input type="text" id="lunarN" placeholder="例如: 隊員 2 名" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 mt-0.5">
+          </div>
+          <div>
+            <span class="text-red-400 font-bold block">A - Air (剩餘氣量)</span>
+            <input type="text" id="lunarA" placeholder="例如: 70 bar / 殘壓警報" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 mt-0.5">
+          </div>
+          <div class="col-span-2">
+            <span class="text-red-400 font-bold block">R - Resources (所需資源)</span>
+            <input type="text" id="lunarR" placeholder="例如: 帶切斷剪、RIT Bag、二號門破壞開口" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 mt-0.5">
+          </div>
+        </div>
+      </div>
+
+      <div class="space-y-1.5 text-xs text-slate-300">
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" id="mChk1" class="accent-red-600">
+          <span>切換救災專用頻道，無線電頻道淨空（非救援人員保持靜音）</span>
+        </label>
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" id="mChk2" class="accent-red-600">
+          <span>指派專責 RIT 入室搜救，同步通知預備第二救援梯隊</span>
+        </label>
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" id="mChk3" class="accent-red-600">
+          <span>建立備用救援出入口並實施軟化建築物結構</span>
+        </label>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+        <button onclick="closeMaydayModal()" class="px-3 py-1.5 bg-slate-800 text-slate-300 rounded">關閉</button>
+        <button onclick="logMaydayActivation()" class="bg-red-600 hover:bg-red-500 text-white font-extrabold px-4 py-1.5 rounded shadow">
+          廣播啟動 RIT 搜救行動
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let clockInterval = null;
+    let clockSeconds = 0;
+    let isClockRunning = false;
+    let currentStrategy = 'OFFENSIVE';
+    let currentModalTarget = '';
+    
+    const unitsData = {
+      'Alpha': [],
+      'Bravo': [],
+      'Charlie': [],
+      'Delta': []
+    };
+
+    const sopTemplates = {
+      residential: [
+        '確認地下室/閣樓延燒', '第二逃生口/防盜窗破壞',
+        '閣樓 Attic 延燒檢查', '主搜 Primary Search (寢室)'
+      ],
+      factory: [
+        'SDS/H-Card 化學品清冊確認', '劃定冷/暖/熱區與除污站',
+        '泡沫原液倍數/存量計算', '無人機空拍/消防機器人調派'
+      ],
+      highrise: [
+        '連結送水管雙線加壓供水', '前進集結區 (起火層下2樓)',
+        '梯間正壓排煙 / 防煙閘門', '廣播就地避難 Defend-in-place'
+      ]
+    };
+
+    window.onload = function() {
+      onFireTypeChanged();
+      renderAllDivisions();
+      updateManpowerCalculations();
+    };
+
+    function toggleIncidentClock() {
+      const btn = document.getElementById('clockToggleBtn');
+      if (!isClockRunning) {
+        isClockRunning = true;
+        btn.textContent = '暫停計時';
+        btn.className = 'px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded shadow transition';
+        clockInterval = setInterval(() => {
+          clockSeconds++;
+          updateClockDisplay();
+          if (clockSeconds > 0 && clockSeconds % 600 === 0) {
+            document.getElementById('parAlertBox').classList.remove('hidden');
+            addLog('🚨 【系統提醒】火場作戰已達 ' + (clockSeconds/60) + ' 分鐘，請進行全場 PAR 點名！');
+          }
+        }, 1000);
+        addLog('▶️ 啟動火場主計時器');
+      } else {
+        isClockRunning = false;
+        clearInterval(clockInterval);
+        btn.textContent = '繼續計時';
+        btn.className = 'px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition';
+        addLog('⏸️ 暫停火場主計時器');
+      }
+    }
+
+    function resetIncidentClock() {
+      isClockRunning = false;
+      clearInterval(clockInterval);
+      clockSeconds = 0;
+      updateClockDisplay();
+      const btn = document.getElementById('clockToggleBtn');
+      btn.textContent = '啟動計時';
+      btn.className = 'px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded shadow transition';
+      document.getElementById('parAlertBox').classList.add('hidden');
+      addLog('🔄 重設火場主計時器');
+    }
+
+    function updateClockDisplay() {
+      const m = String(Math.floor(clockSeconds / 60)).padStart(2, '0');
+      const s = String(clockSeconds % 60).padStart(2, '0');
+      document.getElementById('masterClockDisplay').textContent = `${m}:${s}`;
+    }
+
+    function acknowledgeParAlert() {
+      document.getElementById('parAlertBox').classList.add('hidden');
+      addLog('✅ 指揮官確認完成 PAR 各區點名');
+    }
+
+    function setStrategy(mode) {
+      currentStrategy = mode;
+      const indicator = document.getElementById('strategyIndicator');
+      const btnOff = document.getElementById('btnOffensive');
+      const btnDef = document.getElementById('btnDefensive');
+      const notice = document.getElementById('defensiveNotice');
+
+      if (mode === 'OFFENSIVE') {
+        indicator.textContent = 'OFFENSIVE';
+        indicator.className = 'text-[10px] bg-blue-900/50 text-blue-300 border border-blue-700 px-1.5 py-0.5 rounded font-mono font-bold';
+        btnOff.className = 'py-2 rounded font-black text-xs uppercase tracking-wider bg-blue-600 text-white shadow ring-2 ring-blue-400 transition';
+        btnDef.className = 'py-2 rounded font-black text-xs uppercase tracking-wider bg-slate-800 text-slate-400 hover:bg-slate-700 transition';
+        notice.classList.add('hidden');
+        addLog('🛡️ 切換戰術模式為：進攻模式 (OFFENSIVE)');
+      } else {
+        indicator.textContent = 'DEFENSIVE';
+        indicator.className = 'text-[10px] bg-red-900/50 text-red-300 border border-red-700 px-1.5 py-0.5 rounded font-mono font-bold';
+        btnDef.className = 'py-2 rounded font-black text-xs uppercase tracking-wider bg-red-600 text-white shadow ring-2 ring-red-400 transition';
+        btnOff.className = 'py-2 rounded font-black text-xs uppercase tracking-wider bg-slate-800 text-slate-400 hover:bg-slate-700 transition';
+        notice.classList.remove('hidden');
+        addLog('🚨 宣告戰術模式轉換為：防禦模式 (DEFENSIVE MODE DECLARED)！全面撤離！');
+      }
+    }
+
+    function loadCustomVideo() {
+      let val = document.getElementById('videoUrlInput').value.trim();
+      let videoId = val;
+      if (val.includes('v=')) {
+        videoId = val.split('v=')[1].split('&')[0];
+      } else if (val.includes('youtu.be/')) {
+        videoId = val.split('youtu.be/')[1].split('?')[0];
+      }
+      document.getElementById('ytPlayer').src = `https://www.youtube.com/embed/${videoId}?enablejsapi=1`;
+      addLog(`📹 載入火場情境影片 ID: ${videoId}`);
+    }
+
+    function onFireTypeChanged() {
+      const type = document.getElementById('fireTypeSelect').value;
+      const container = document.getElementById('sopContainer');
+      container.innerHTML = '';
+      const list = sopTemplates[type] || [];
+      list.forEach((item, idx) => {
+        const label = document.createElement('label');
+        label.className = 'flex items-center gap-1.5 cursor-pointer text-slate-300 hover:text-white';
+        label.innerHTML = `<input type="checkbox" onchange="logCheckbox('${item}')" class="accent-amber-500 rounded"><span>${item}</span>`;
+        container.appendChild(label);
+      });
+      addLog(`📋 切換 SOP 典範為: ${document.getElementById('fireTypeSelect').options[document.getElementById('fireTypeSelect').selectedIndex].text}`);
+    }
+
+    function logCheckbox(name) {
+      addLog(`☑️ 標記戰術里程碑: ${name}`);
+    }
+
+    function cycleReceo(btn, label) {
+      if (!btn.dataset.state || btn.dataset.state === 'none') {
+        btn.dataset.state = 'working';
+        btn.className = 'receo-btn py-1 px-1 rounded text-[11px] font-bold bg-amber-600 text-white border border-amber-500 shadow';
+        addLog(`⏳ RECEO-VS [${label}] 進入執行中`);
+      } else if (btn.dataset.state === 'working') {
+        btn.dataset.state = 'done';
+        btn.className = 'receo-btn py-1 px-1 rounded text-[11px] font-bold bg-emerald-600 text-white border border-emerald-500 shadow';
+        addLog(`✅ RECEO-VS [${label}] 標記完成`);
+      } else {
+        btn.dataset.state = 'none';
+        btn.className = 'receo-btn py-1 px-1 rounded text-[11px] font-bold bg-slate-800 text-slate-400 border border-slate-700';
+      }
+    }
+
+    function openAssignModal(sectorName) {
+      currentModalTarget = sectorName;
+      document.getElementById('modalTargetSector').textContent = `指派小組至：${sectorName}`;
+      document.getElementById('modalUnitName').value = '';
+      document.getElementById('modalUnitTask').value = '';
+      document.getElementById('modalUnitCount').value = '3';
+      document.getElementById('assignModal').classList.remove('hidden');
+    }
+
+    function closeAssignModal() {
+      document.getElementById('assignModal').classList.add('hidden');
+    }
+
+    function submitAssignUnit() {
+      const name = document.getElementById('modalUnitName').value.trim() || '未知單位';
+      const task = document.getElementById('modalUnitTask').value.trim() || '內攻滅火';
+      const count = parseInt(document.getElementById('modalUnitCount').value, 10) || 3;
+      
+      const key = currentModalTarget.replace(' 區', '');
+      if (!unitsData[key]) unitsData[key] = [];
+      
+      unitsData[key].push({ id: Date.now(), name, task, count });
+      closeAssignModal();
+      renderAllDivisions();
+      updateManpowerCalculations();
+      addLog(`➕ 指派 ${name} (${count}人) 進入 ${currentModalTarget} 執行 ${task}`);
+    }
+
+    function removeUnit(sectorKey, unitId) {
+      if (unitsData[sectorKey]) {
+        const idx = unitsData[sectorKey].findIndex(u => u.id === unitId);
+        if (idx !== -1) {
+          const u = unitsData[sectorKey][idx];
+          unitsData[sectorKey].splice(idx, 1);
+          renderAllDivisions();
+          updateManpowerCalculations();
+          addLog(`➖ ${sectorKey} 區撤離小組: ${u.name}`);
+        }
+      }
+    }
+
+    function renderAllDivisions() {
+      Object.keys(unitsData).forEach(key => {
+        const container = document.getElementById(`div-${key}-units`);
+        if (!container) return;
+        container.innerHTML = '';
+        
+        unitsData[key].forEach(u => {
+          const div = document.createElement('div');
+          div.className = 'bg-slate-900 border border-slate-800 rounded p-2 text-xs space-y-1';
+          div.innerHTML = `
+            <div class="flex items-center justify-between font-bold text-slate-200">
+              <span class="text-blue-400">🔥 ${u.name} (${u.count}人 - 作戰中)</span>
+              <button onclick="removeUnit('${key}', ${u.id})" class="text-slate-500 hover:text-red-400 font-bold">✖</button>
+            </div>
+            <div class="text-[11px] text-slate-400">任務: ${u.task}</div>
+            <div class="grid grid-cols-2 gap-1 pt-1 text-[10px]">
+              <div class="bg-amber-950/60 border border-amber-900/60 text-amber-300 p-1 rounded">
+                🛡️ Standby 待命: ${u.count}人 (槽位)
+              </div>
+              <div class="bg-indigo-950/60 border border-indigo-900/60 text-indigo-300 p-1 rounded">
+                ☕ Rehab 修整: ${u.count}人 (槽位)
+              </div>
+            </div>
+          `;
+          container.appendChild(div);
+        });
+
+        if (unitsData[key].length === 0) {
+          container.innerHTML = `<div class="text-slate-600 italic text-[11px] py-1 text-center">尚無指派單位</div>`;
+        }
+      });
+    }
+
+    function updateManpowerCalculations() {
+      const avail = parseInt(document.getElementById('availableManpowerInput').value, 10) || 0;
+      let totalWorking = 0;
+      
+      Object.keys(unitsData).forEach(k => {
+        unitsData[k].forEach(u => {
+          totalWorking += u.count;
+        });
+      });
+
+      const required = totalWorking * 3;
+      document.getElementById('workingCount').textContent = totalWorking;
+      document.getElementById('requiredCount').textContent = required;
+
+      const tag = document.getElementById('manpowerAlertTag');
+      if (required > avail) {
+        tag.textContent = `⚠️ 人力告急! 缺 ${required - avail} 人 (未符合1:2)`;
+        tag.className = 'px-2 py-0.5 rounded font-bold text-[11px] bg-red-950 text-red-300 border border-red-800 animate-pulse';
+      } else {
+        tag.textContent = '人力安全 (1:2 符合)';
+        tag.className = 'px-2 py-0.5 rounded font-bold text-[11px] bg-emerald-950 text-emerald-300 border border-emerald-800';
+      }
+    }
+
+    function addNewCustomDivision() {
+      const name = prompt('請輸入新分區或垂直樓層名稱 (例如: 3F / 地下室 / Roof):');
+      if (!name) return;
+      const key = name.trim();
+      if (!unitsData[key]) {
+        unitsData[key] = [];
+        
+        const grid = document.getElementById('divisionGrid');
+        const card = document.createElement('div');
+        card.className = 'division-card bg-slate-950 border border-slate-800 rounded-lg p-2.5 flex flex-col gap-2';
+        card.innerHTML = `
+          <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
+            <span class="font-extrabold text-xs text-amber-400 flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+              ${key.toUpperCase()} 分區
+            </span>
+            <button onclick="openAssignModal('${key}')" class="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-0.5 rounded border border-slate-700">
+              + 指派小組
+            </button>
+          </div>
+          <div class="unit-list space-y-1.5 min-h-[50px]" id="div-${key}-units"></div>
+        `;
+        grid.appendChild(card);
+        renderAllDivisions();
+        addLog(`➕ 新增自訂作戰分區: ${key}`);
+      }
+    }
+
+    function addLog(msg) {
+      const container = document.getElementById('eventLogContainer');
+      const timeStr = document.getElementById('masterClockDisplay').textContent;
+      const div = document.createElement('div');
+      div.className = 'text-slate-300 border-b border-slate-900/50 pb-0.5';
+      div.textContent = `[${timeStr}] ${msg}`;
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function addManualLog() {
+      const input = document.getElementById('manualLogInput');
+      const txt = input.value.trim();
+      if (txt) {
+        addLog(txt);
+        input.value = '';
+      }
+    }
+
+    function clearEventLogs() {
+      document.getElementById('eventLogContainer').innerHTML = '';
+      addLog('紀錄簿已重置');
+    }
+
+    function triggerMaydayModal() {
+      document.getElementById('maydayModal').classList.remove('hidden');
+      addLog('🚨 點擊觸發 MAYDAY / RIT 緊急處置面板');
+    }
+
+    function closeMaydayModal() {
+      document.getElementById('maydayModal').classList.add('hidden');
+    }
+
+    function logMaydayActivation() {
+      const l = document.getElementById('lunarL').value || '未知';
+      const u = document.getElementById('lunarU').value || '未知';
+      const n = document.getElementById('lunarN').value || '未知';
+      const a = document.getElementById('lunarA').value || '未知';
+      const r = document.getElementById('lunarR').value || '未知';
+
+      addLog(`🚨🚨🚨 【MAYDAY 發布】 L:${l} | U:${u} | N:${n} | A:${a} | R:${r}`);
+      alert('已於時序紀錄簿廣播登錄 MAYDAY LUNAR 訊息！救援行動開始！');
+      closeMaydayModal();
+    }
+
+    function exportTacticalLog() {
+      let content = `========================================\n`;
+      content += `   火場指揮官戰術管制與 AAR 報告記錄\n`;
+      content += `========================================\n`;
+      content += `火場歷時: ${document.getElementById('masterClockDisplay').textContent}\n`;
+      content += `當前戰術策略: ${currentStrategy}\n`;
+      content += `建物構造: ${document.getElementById('infoStructure').value}\n`;
+      content += `起火樓層/位置: ${document.getElementById('infoFireFloor').value}\n`;
+      content += `受困人數: ${document.getElementById('infoVictims').value}\n`;
+      content += `主要水源: ${document.getElementById('infoWaterSource').value}\n\n`;
+      
+      content += `【分區部隊配置】\n`;
+      Object.keys(unitsData).forEach(k => {
+        content += `[${k} 區]:\n`;
+        if (unitsData[k].length === 0) content += `  (無作業單位)\n`;
+        unitsData[k].forEach(u => {
+          content += `  - ${u.name} (${u.count}人) | 任務: ${u.task}\n`;
+        });
+      });
+
+      content += `\n【指揮時序歷程 Event Logs】\n`;
+      const logs = document.getElementById('eventLogContainer').children;
+      for (let i = 0; i < logs.length; i++) {
+        content += `${logs[i].textContent}\n`;
+      }
+
+      navigator.clipboard.writeText(content).then(() => {
+        alert('AAR 戰術報告已成功複製至剪貼簿！');
+      }).catch(() => {
+        alert('複製失敗，請手動複製。');
+      });
+    }
+  </script>
+</body>
+</html>
